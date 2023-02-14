@@ -4,6 +4,7 @@ This project demonstrates a basic Hardhat use case. It comes with a sample contr
 
 Try running the commands to compile contract:
 
-```npm i
+```
+   npm i
    npx hardhat compile
 ```
