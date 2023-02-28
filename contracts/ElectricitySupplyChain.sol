@@ -179,6 +179,7 @@ contract ElectricitySupplyChain {
         powerPlantsDailyEnergySoldById[substation.powerplantId][
             today
         ] += _energyAmount;
+        powerPlant.totalEnergySold+=_energyAmount;
         emit EnergyBoughtBySubstation(
             substationsAddressToIds[msg.sender],
             _energyAmount,
@@ -293,7 +294,7 @@ contract ElectricitySupplyChain {
         return substationsDailyEnergySoldById[_substationIndex][_day];
     }
 
-    function getSubstationEnergyBoguhtByDay(
+    function getSubstationEnergyBoughtByDay(
         uint256 _substationIndex,
         uint256 _day
     ) public view substationExists(_substationIndex) returns (uint256) {

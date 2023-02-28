@@ -176,4 +176,70 @@ describe("Energy Supply Chain", async () => {
       });
     });
   });
+
+  describe("Substation",()=>{
+    const powerplantName = "Power Plant One";
+    const powerplantArea = "Delhi";
+    const energyAvailable = 1000;
+    const substationName="Substation One"
+    const substationArea = "Delhi";
+    const today = parseInt(new Date().getTime() / (86400 * 1000));
+    const yesterday = Math.floor(
+      new Date("27 Feb 2023").getTime() / (1000 * 86400)
+    );
+    const tomorrow = Math.floor(
+      new Date("28 Feb 2023").getTime() / (1000 * 86400)
+    );
+    beforeEach(async()=>{
+      await energyContractPowerplantOne.addPowerPlant(
+        powerplantName,
+        powerplantArea,
+        energyAvailable
+      );
+    })
+    it("Should revert if the powerplant does not exist",async()=>{
+          await expect(energyContractSubstationOne.addSubstation(2,substationName,substationArea)).to.be.revertedWith("Power Plant does not exist")
+    })
+
+    it("Should add the substation",async()=>{
+        const tx =   await (energyContractSubstationOne.addSubstation(1,substationName,substationArea))
+        const txRes = await tx.wait(1)
+        const [substationId,powerplantId,substationowner]=txRes.events[0].args
+        const powerplant = await energyContract.getPowerplantById(1)
+        const substation = await energyContract.getSubstationById(1)
+        assert.equal(substationId.toString(),'1')
+        assert.equal(substationId.toString(),'1')
+        assert.equal(substationowner,substationOne.address)
+        assert.equal(substation.powerplantId.toString(),'1')
+    })
+
+    it("Should buy energy from powerplant -> revert if substation doesnt exist",async()=>{
+        await expect(energyContractSubstationOne.buyEnergyFromPowerPlant(100)).to.be.reverted
+    })
+
+    it("Should be able to buy energy from power plant",async()=>{
+      await  (energyContractSubstationOne.addSubstation(1,substationName,substationArea))
+      const tx = await energyContractSubstationOne.buyEnergyFromPowerPlant(100)
+      const powerplant = await energyContract.getPowerplantById(1)
+      const substation = await energyContract.getSubstationById(1)
+      const powerplantEnergySoldByDay= await energyContract.getPowerPlantEnergySoldByDay(1,today)
+      const substationEnergySoldByDay= await energyContract.getSubstationEnergySoldByDay(1,today)
+      const substationEnergyBoughtByDay= await energyContract.getSubstationEnergyBoughtByDay(1,today)
+      const substationEnergyBoughtYesterday= await energyContract.getSubstationEnergyBoughtByDay(1,yesterday)
+      const txRes = await tx.wait(1)
+      const [substaionId,energyBought,date]=txRes.events[0].args
+      assert.equal(substaionId.toString(),'1')
+      assert.equal(energyBought.toString(),'100')
+      assert.equal(date.toString(),today)
+      assert.equal(powerplant.energyAvailableToBuy.toString(),energyAvailable-100)
+      assert.equal(powerplant.totalEnergyProduced.toString(),energyAvailable)
+      assert.equal(powerplant.totalEnergySold.toString(),100)
+      assert.equal(substation.totalEnergyReceived.toString(),100)
+      assert.equal(substation.energyAvailableToBuy.toString(),100)
+      assert.equal(powerplantEnergySoldByDay.toString(),100)
+      assert.equal(substationEnergySoldByDay.toString(),0)
+      assert.equal(substationEnergyBoughtByDay.toString(),100)
+      assert.equal(substationEnergyBoughtYesterday.toString(),0)
+    })
+  })
 });
