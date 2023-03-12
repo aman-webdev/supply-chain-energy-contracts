@@ -1,5 +1,6 @@
 const { network } = require("hardhat");
 const { networkConfig,developmentChains } = require("../helper-hardhat-config");
+const verify = require("../scripts/verify");
 
 module.exports = async function ({ getNamedAccounts, deployments }) {
   const { deploy, log } = deployments;
@@ -17,6 +18,10 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     log: true,
   });
   log("Deployed at ", energyContract.address);
+
+  if(!developmentChains.includes(network.name)){
+    await verify(energyContract.address,[])
+  }
   
 };
 
