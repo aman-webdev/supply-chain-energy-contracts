@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
-import "hardhat/console.sol";
+// import "hardhat/console.sol";
 
 contract ElectricitySupplyChain {
     event PowerPlantAdded(uint256 indexed powerplantId, address indexed owner);
@@ -12,8 +12,13 @@ contract ElectricitySupplyChain {
 
     event SubstationAdded(
         uint256 indexed substationId,
-        uint256 indexed powerplantId,
-        address indexed owner
+        address indexed owner,
+        uint256 energyAvailableToBuy
+    );
+    event SubstationConnectedToPowerPlant(
+        uint256 indexed substationId,
+        uint256 indexed powerPlantId,
+        uint256 indexed prevPowerplantId
     );
     event EnergyBoughtBySubstation(
         uint256 indexed substationId,
@@ -23,8 +28,13 @@ contract ElectricitySupplyChain {
 
     event DistributorAdded(
         uint256 indexed distributorId,
+        address indexed owner,
+        uint256 energyAvailableToBuy
+    );
+    event DistributorConnectedToSubstation(
+        uint256 indexed distributorId,
         uint256 indexed substationId,
-        address indexed owner
+        uint256 indexed prevSubstationId
     );
     event EnergyBoughtByDistributor(
         uint256 indexed distributorId,
@@ -66,6 +76,19 @@ contract ElectricitySupplyChain {
         uint256 energyAvailableToBuy;
     }
 
+    struct Consumer {
+        string name;
+        string homeAddress;
+        address consumerAddress;
+        uint256 distributorId;
+        uint256 totalEnergyConsumed;
+        bool isElectricitySupply;
+        uint256 energyPrice;
+        uint256 unitsConsumedInOngoingCycle;
+        uint256 startCycleTime;
+        uint256 endCycleTime;
+    }
+
     // Define an array to hold all the power plants
     mapping(uint256 => PowerPlant) public powerPlants;
     mapping(address => uint256) public powerPlantsAddressToIds;
@@ -83,10 +106,14 @@ contract ElectricitySupplyChain {
     mapping(uint256 => mapping(uint256 => uint256)) substationsDailyEnergyBoughtById;
     mapping(uint256 => mapping(uint256 => uint256)) substationsDailyEnergySoldById;
 
+    mapping(uint256 =>Consumer) public consumers;
+    mapping(address=>uint256) public consumersAddressToIds;
+
     // ids for each entity
     uint256 powerPlantCount;
     uint256 distributorCount;
     uint256 substationCount;
+    uint256 consumerCount;
 
     // Define a function to add a new power plant to the supply chain
     function addPowerPlant(
@@ -107,21 +134,18 @@ contract ElectricitySupplyChain {
         powerplant.energyAvailableToBuy = _energyAvailableToBuy;
         powerplant.totalEnergyProduced = _energyAvailableToBuy;
         uint256 today = block.timestamp / 86400;
-        powerPlantsDailyEnergyProducedById[powerPlantCount][today] = _energyAvailableToBuy;
+        powerPlantsDailyEnergyProducedById[powerPlantCount][
+            today
+        ] = _energyAvailableToBuy;
         emit PowerPlantAdded(powerPlantCount, msg.sender);
     }
 
     // Define a function to add a new substation to a power plant
     function addSubstation(
-        uint256 _powerPlantId,
+        uint256 _energyAvailableToBuy,
         string memory _name,
         string memory _area
     ) public {
-        // check if powerplant exists
-        require(
-            powerPlants[_powerPlantId].powerplantAddress != address(0),
-            "Power Plant does not exist"
-        );
         require(
             substationsAddressToIds[msg.sender] == 0,
             "Substation already exists with the current address"
@@ -132,10 +156,49 @@ contract ElectricitySupplyChain {
         substation.name = _name;
         substation.area = _area;
         substation.substationAddress = msg.sender;
-        substation.powerplantId = _powerPlantId;
+        substation.energyAvailableToBuy = _energyAvailableToBuy;
         // add substation id to the power plant
-        powerPlants[_powerPlantId].substationIds.push(substationCount);
-        emit SubstationAdded(substationCount, _powerPlantId, msg.sender);
+
+        emit SubstationAdded(
+            substationCount,
+            msg.sender,
+            _energyAvailableToBuy
+        );
+    }
+
+    function connectSubstationToPowerplant(
+        uint256 powerplantIndex
+    ) public onlySubstationOwner powerPlantExists(powerplantIndex) {
+       
+        Substation storage substation = substations[
+            substationsAddressToIds[msg.sender]
+        ];
+        uint256 prevPlantId = substation.powerplantId;
+        if (substation.powerplantId != 0) {
+            PowerPlant storage prevPlant = powerPlants[substation.powerplantId];
+            uint256 index;
+            for (uint256 i = 0; i < prevPlant.substationIds.length; i++) {
+                if (
+                    prevPlant.substationIds[i] ==
+                    substationsAddressToIds[msg.sender]
+                ) {
+                    index = i;
+                    break;
+                }
+            }
+            for (uint i = index; i < prevPlant.substationIds.length - 1; i++) {
+                prevPlant.substationIds[i] = prevPlant.substationIds[i + 1];
+            }
+            prevPlant.substationIds.pop();
+        }
+        substation.powerplantId = powerplantIndex;
+        PowerPlant storage powerplant = powerPlants[powerplantIndex];
+        powerplant.substationIds.push(substationsAddressToIds[msg.sender]);
+        emit SubstationConnectedToPowerPlant(
+            substationsAddressToIds[msg.sender],
+            powerplantIndex,
+            prevPlantId
+        );
     }
 
     // Define a function to add energy available to buy for a powerplant
@@ -179,7 +242,7 @@ contract ElectricitySupplyChain {
         powerPlantsDailyEnergySoldById[substation.powerplantId][
             today
         ] += _energyAmount;
-        powerPlant.totalEnergySold+=_energyAmount;
+        powerPlant.totalEnergySold += _energyAmount;
         emit EnergyBoughtBySubstation(
             substationsAddressToIds[msg.sender],
             _energyAmount,
@@ -190,27 +253,65 @@ contract ElectricitySupplyChain {
     function addDistributor(
         string memory _name,
         string memory _area,
-        uint256 _substationIndex
+        uint256 _energyAvailableToBuy
     ) public {
-        require(
-            substations[_substationIndex].substationAddress != address(0),
-            "Substation does not exist"
-        );
         require(
             distributorAddressToIds[msg.sender] == 0,
             "Distributor already exists with the address"
         );
         distributorCount += 1;
-        // Get the substation from the power plant's substations array
-        Substation storage substation = substations[_substationIndex];
         Distributor storage distributor = distributors[distributorCount];
+        distributorAddressToIds[msg.sender]=distributorCount;
         distributor.name = _name;
         distributor.area = _area;
         distributor.distributorAddress = msg.sender;
+        distributor.energyAvailable = _energyAvailableToBuy;
+        emit DistributorAdded(
+            distributorCount,
+            msg.sender,
+            _energyAvailableToBuy
+        );
+    }
+
+    function connectDistributorToSubstation(
+        uint256 _substationIndex
+    ) public onlyDistributorOwner substationExists(_substationIndex) {
+        Distributor storage distributor = distributors[
+            distributorAddressToIds[msg.sender]
+        ];
+        uint256 prevSubstationIndex = distributor.substationId;
+        if (distributor.substationId != 0) {
+            Substation storage prevSubstation = substations[
+                distributor.substationId
+            ];
+            uint256 index;
+            for (uint256 i = 0; i < prevSubstation.distributorIds.length; i++) {
+                if (
+                    prevSubstation.distributorIds[i] ==
+                    distributorAddressToIds[msg.sender]
+                ) {
+                    index = i;
+                    break;
+                }
+            }
+            for (
+                uint i = index;
+                i < prevSubstation.distributorIds.length - 1;
+                i++
+            ) {
+                prevSubstation.distributorIds[i] = prevSubstation
+                    .distributorIds[i + 1];
+            }
+            prevSubstation.distributorIds.pop();
+        }
         distributor.substationId = _substationIndex;
-        // Add the new Distributor to the distributors array of the substation
-        substation.distributorIds.push(distributorCount);
-        emit DistributorAdded(distributorCount, _substationIndex, msg.sender);
+        Substation storage substation = substations[_substationIndex];
+        substation.distributorIds.push(substationsAddressToIds[msg.sender]);
+        emit DistributorConnectedToSubstation(
+            distributorAddressToIds[msg.sender],
+            _substationIndex,
+            prevSubstationIndex
+        );
     }
 
     function buyEnergyFromSubstation(
@@ -239,6 +340,23 @@ contract ElectricitySupplyChain {
         emit EnergyBoughtByDistributor(distributorId, _energyAmount, today);
     }
 
+    function addconsumer(string memory _name, string memory _homeAddress) public{
+            consumerCount+=1;
+            Consumer storage consumer = consumers[consumerCount];
+            consumer.name=_name;
+            consumer.homeAddress = _homeAddress;
+            consumersAddressToIds[msg.sender]=consumerCount;
+            consumers[consumerCount] = consumer;
+            consumer.consumerAddress=msg.sender;
+    }
+
+    function startEnergySupplyFromDistributor(uint256 _distributorIndex) distributorExists(_distributorIndex) onlyConsumerOwner() public{ 
+        uint256 consumerId = consumersAddressToIds[msg.sender];
+        Consumer storage consumer = consumers[consumerId];
+        consumer.startCycleTime=block.timestamp;
+    }
+
+    // TODO: Check every 15 mins to see the energy produced by each consumer and then reduce the amount of emergy used by consumers by calculating the block timestamp
 
     // powerplants
     function getPowerplantById(
@@ -266,11 +384,21 @@ contract ElectricitySupplyChain {
         return powerPlantsDailyEnergyProducedById[_powerplantIndex][_day];
     }
 
-    function getSubstationsOfPowerPlant(uint256 _powerplantIndex) external view powerPlantExists(_powerplantIndex) returns (Substation[] memory){
-        uint256[] memory substationIds = getPowerplantById(_powerplantIndex).substationIds;
-        Substation[] memory substationsArray = new Substation[](substationIds.length);
-        for(uint256 i=0;i<substationIds.length;i++){
-            substationsArray[i]=(getSubstationById(substationIds[i]));
+    function getSubstationsOfPowerPlant(
+        uint256 _powerplantIndex
+    )
+        external
+        view
+        powerPlantExists(_powerplantIndex)
+        returns (Substation[] memory)
+    {
+        uint256[] memory substationIds = getPowerplantById(_powerplantIndex)
+            .substationIds;
+        Substation[] memory substationsArray = new Substation[](
+            substationIds.length
+        );
+        for (uint256 i = 0; i < substationIds.length; i++) {
+            substationsArray[i] = (getSubstationById(substationIds[i]));
         }
         return substationsArray;
     }
@@ -301,7 +429,6 @@ contract ElectricitySupplyChain {
         return substationsDailyEnergyBoughtById[_substationIndex][_day];
     }
 
-    
     // distributors
     function getDistributorById(
         uint256 _distributorIndex
@@ -348,6 +475,17 @@ contract ElectricitySupplyChain {
             distributors[_distributorIndex].distributorAddress != address(0),
             "Distributor does not exist"
         );
+        _;
+    }
+
+    modifier consumerExists(uint256 _consumerIndex){
+        require(consumers[_consumerIndex].consumerAddress != address(0),"Consumer does not exist");
+        _;
+    }
+
+    modifier onlyConsumerOwner(){
+        require(consumersAddressToIds[msg.sender] !=0,"Consumer does not exist or you are not the owner");
+        require(consumers[consumersAddressToIds[msg.sender]].consumerAddress==msg.sender,"You are not the owner");
         _;
     }
 
