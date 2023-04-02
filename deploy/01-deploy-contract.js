@@ -18,7 +18,7 @@ module.exports = async function ({ getNamedAccounts, deployments }) {
     log: true,
   });
   log("Deployed at ", energyContract.address);
-
+ 
   if(!developmentChains.includes(network.name)){
     await verify(energyContract.address,[])
   }

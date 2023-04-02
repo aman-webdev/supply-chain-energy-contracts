@@ -4,19 +4,20 @@ const { time } = require("@openzeppelin/test-helpers");
 
 describe("Energy Supply Chain", async () => {
   let energyContract;
-  let owner, powerplantOne, substationOne, distributorOne,powerplantTwo;
+  let owner, powerplantOne, substationOne, distributorOne,consumerOne,powerplantTwo;
   let energyContractPowerplantOne,
     energyContractSubstationOne,
-    energyContractDistributorOne,energyContractPowerplantTwo;
+    energyContractDistributorOne,energyContractPowerplantTwo,energyContractconsumerOne;
   beforeEach(async () => {
     await deployments.fixture(["all"]);
     energyContract = await ethers.getContract("ElectricitySupplyChain");
-    [owner, powerplantOne, substationOne, distributorOne,powerplantTwo] =
+    [owner, powerplantOne, substationOne, distributorOne,powerplantTwo,consumerOne] =
       await ethers.getSigners();
     energyContractPowerplantOne = energyContract.connect(powerplantOne);
     energyContractSubstationOne = energyContract.connect(substationOne);
     energyContractDistributorOne = energyContract.connect(distributorOne);
     energyContractPowerplantTwo = energyContract.connect(powerplantTwo);
+    energyContractconsumerOne = energyContract.connect(consumerOne);
     
   });
 
@@ -278,5 +279,35 @@ describe("Energy Supply Chain", async () => {
       assert.equal(substationEnergyBoughtByDay.toString(),100)
       assert.equal(substationEnergyBoughtYesterday.toString(),0)
     })
+  })
+
+  describe("Consumer",()=>{
+    beforeEach(async()=>{
+      await energyContractDistributorOne.addDistributor("Distributor One","Delhi",1000);
+      await energyContractconsumerOne.addConsumer("Consumer One","Delhi");
+      await energyContractconsumerOne.connectConsumerToDistributor(1)
+    })
+
+    it("Should add the consumer",async()=>{
+      const consumerInfo = await energyContract.consumers(1);
+      assert.equal(consumerInfo.consumerAddress,consumerOne.address)
+      assert.equal(consumerInfo.homeAddress,"Delhi")
+      assert.equal(consumerInfo.distributorId.toString(),"1")
+    })
+
+    it("Should calculate the units consumed after two minutess",async()=>{
+      const dist = await energyContract.distributors(1)
+      const consumers = await energyContract.getConsumersFromADistributor(1)
+      console.log("consumers",consumers[0].toString())
+      await ethers.provider.send("evm_increaseTime", [172]); // Move 2 days forward
+      await ethers.provider.send("evm_mine", []);
+      await energyContract.calculateEnergyConsumptionOfEachConsumer()
+      const consumer = await energyContract.consumers(1)
+      console.log(consumer.totalEnergyConsumed.toString(), consumer.energyConsumedInCurrentCycle.toString())
+      const distributor = await energyContract.distributors(1)
+      console.log(distributor.energyAvailable.toString())
+
+    })
+
   })
 });
