@@ -4,18 +4,21 @@ const { time } = require("@openzeppelin/test-helpers");
 
 describe("Energy Supply Chain", async () => {
   let energyContract;
-  let owner, powerplantOne, substationOne, distributorOne;
+  let owner, powerplantOne, substationOne, distributorOne,consumerOne,powerplantTwo;
   let energyContractPowerplantOne,
     energyContractSubstationOne,
-    energyContractDistributorOne;
+    energyContractDistributorOne,energyContractPowerplantTwo,energyContractconsumerOne;
   beforeEach(async () => {
     await deployments.fixture(["all"]);
     energyContract = await ethers.getContract("ElectricitySupplyChain");
-    [owner, powerplantOne, substationOne, distributorOne] =
+    [owner, powerplantOne, substationOne, distributorOne,powerplantTwo,consumerOne] =
       await ethers.getSigners();
     energyContractPowerplantOne = energyContract.connect(powerplantOne);
     energyContractSubstationOne = energyContract.connect(substationOne);
     energyContractDistributorOne = energyContract.connect(distributorOne);
+    energyContractPowerplantTwo = energyContract.connect(powerplantTwo);
+    energyContractconsumerOne = energyContract.connect(consumerOne);
+    
   });
 
   describe("Deployment", () => {
@@ -183,6 +186,7 @@ describe("Energy Supply Chain", async () => {
     const energyAvailable = 1000;
     const substationName="Substation One"
     const substationArea = "Delhi";
+    const substationEnergyAvailableToBuy = 1000
     const today = parseInt(new Date().getTime() / (86400 * 1000));
     const yesterday = Math.floor(
       new Date("27 Feb 2023").getTime() / (1000 * 86400)
@@ -202,15 +206,49 @@ describe("Energy Supply Chain", async () => {
     })
 
     it("Should add the substation",async()=>{
-        const tx =   await (energyContractSubstationOne.addSubstation(1,substationName,substationArea))
+        const tx =   await (energyContractSubstationOne.addSubstation(substationEnergyAvailableToBuy,substationName,substationArea))
         const txRes = await tx.wait(1)
-        const [substationId,powerplantId,substationowner]=txRes.events[0].args
+        const [substationId,substationowner,energyAvailableToBuySubstation]=txRes.events[0].args
         const powerplant = await energyContract.getPowerplantById(1)
         const substation = await energyContract.getSubstationById(1)
         assert.equal(substationId.toString(),'1')
         assert.equal(substationId.toString(),'1')
         assert.equal(substationowner,substationOne.address)
-        assert.equal(substation.powerplantId.toString(),'1')
+        assert.equal(energyAvailableToBuySubstation.toString(),substationEnergyAvailableToBuy)
+        assert.equal(substation.powerplantId.toString(),'0')
+    })
+
+    it("Should connect to the powerlpant for first time",async()=>{
+      const txInit =   await (energyContractSubstationOne.addSubstation(substationEnergyAvailableToBuy,substationName,substationArea))
+      const tx = await energyContractSubstationOne.connectSubstationToPowerplant(1)
+      const txRes = await tx.wait(1)
+      const [substationId, powerplantId,prevPlantId] = txRes.events[0].args
+      const substation = await energyContract.getSubstationById(1)
+      assert.equal(substationId.toString(),1)
+      assert.equal(powerplantId.toString(),1)
+      assert.equal(prevPlantId.toString(),0)
+      assert.equal(substation.powerplantId.toString(),1)
+    })
+
+    it("Should change the connected powerplant to another power plant",async()=>{
+      const createPowerplantTwo = await energyContractPowerplantTwo.addPowerPlant("Powerplant two","Delhi",1000)
+      const powerlpantRes = await createPowerplantTwo.wait(1)
+      const [powerplantTwoId] = powerlpantRes.events[0].args
+      const txInit =   await (energyContractSubstationOne.addSubstation(substationEnergyAvailableToBuy,substationName,substationArea))
+      const connectOne = await energyContractSubstationOne.connectSubstationToPowerplant(1)
+      const txConnectOne = await connectOne.wait(1)
+      const [substationIdOne, powerplantIdOne,prevPlantIdOne] = txConnectOne.events[0].args
+      const connectTwo = await energyContractSubstationOne.connectSubstationToPowerplant(2)
+      // console.log(connectTwo)
+      // const txConnectTwo = await connectTwo.wait(1)
+      // const [substationIdTwo, powerplantIdTwo,prevPlantIdTwo] = txConnectTwo.events[0].args
+      assert.equal(powerplantTwoId.toString(),2)
+      assert.equal(substationIdOne.toString(),1)
+      assert.equal(powerplantIdOne.toString(),1)
+      assert.equal(prevPlantIdOne.toString(),0)
+      // assert.equal(substationIdTwo.toString(),1)
+      // assert.equal(powerplantIdTwo.toString(),2)
+      // assert.equal(prevPlantIdTwo.toString(),1)
     })
 
     it("Should buy energy from powerplant -> revert if substation doesnt exist",async()=>{
@@ -241,5 +279,35 @@ describe("Energy Supply Chain", async () => {
       assert.equal(substationEnergyBoughtByDay.toString(),100)
       assert.equal(substationEnergyBoughtYesterday.toString(),0)
     })
+  })
+
+  describe("Consumer",()=>{
+    beforeEach(async()=>{
+      await energyContractDistributorOne.addDistributor("Distributor One","Delhi",1000);
+      await energyContractconsumerOne.addConsumer("Consumer One","Delhi");
+      await energyContractconsumerOne.connectConsumerToDistributor(1)
+    })
+
+    it("Should add the consumer",async()=>{
+      const consumerInfo = await energyContract.consumers(1);
+      assert.equal(consumerInfo.consumerAddress,consumerOne.address)
+      assert.equal(consumerInfo.homeAddress,"Delhi")
+      assert.equal(consumerInfo.distributorId.toString(),"1")
+    })
+
+    it("Should calculate the units consumed after two minutess",async()=>{
+      const dist = await energyContract.distributors(1)
+      const consumers = await energyContract.getConsumersFromADistributor(1)
+      console.log("consumers",consumers[0].toString())
+      await ethers.provider.send("evm_increaseTime", [172]); // Move 2 days forward
+      await ethers.provider.send("evm_mine", []);
+      await energyContract.calculateEnergyConsumptionOfEachConsumer()
+      const consumer = await energyContract.consumers(1)
+      console.log(consumer.totalEnergyConsumed.toString(), consumer.energyConsumedInCurrentCycle.toString())
+      const distributor = await energyContract.distributors(1)
+      console.log(distributor.energyAvailable.toString())
+
+    })
+
   })
 });
