@@ -170,7 +170,7 @@ contract ElectricitySupplyChain {
         string memory _name,
         string memory _area,
         uint256 _energyAvailableToBuy
-    ) public {
+    ) accountExists() public {
         uint256 powerplantId = powerPlantsAddressToIds[msg.sender];
         // check if power plant does not exist with the wallet address
         require(powerplantId == 0, "Power plant already exists");
@@ -192,10 +192,11 @@ contract ElectricitySupplyChain {
 
     // Define a function to add a new substation to a power plant
     function addSubstation(
-        uint256 _energyAvailableToBuy,
+       
         string memory _name,
-        string memory _area
-    ) public {
+        string memory _area,
+        uint256 _energyAvailableToBuy
+    ) accountExists() public {
         require(
             substationsAddressToIds[msg.sender] == 0,
             "Substation already exists with the current address"
@@ -303,7 +304,7 @@ contract ElectricitySupplyChain {
         string memory _name,
         string memory _area,
         uint256 _energyAvailableToBuy
-    ) public {
+    ) accountExists() public {
         require(
             distributorAddressToIds[msg.sender] == 0,
             "Distributor already exists with the address"
@@ -388,14 +389,20 @@ contract ElectricitySupplyChain {
             today
         ] += _energyAmount;
         distributor.isEnergySupply = true;
-
+        distributor.isLessEnergyWarning = false;
+         for (uint j = 0; j < distributor.consumerIds.length; j++) {
+                    Consumer storage consumer = consumers[
+                        distributor.consumerIds[j]
+                    ];
+                    consumer.isElectricitySupply = true;
+         }
         emit EnergyBoughtByDistributor(distributorId, _energyAmount, today);
     }
 
     function addConsumer(
         string memory _name,
         string memory _homeAddress
-    ) public {
+    ) accountExists() public {
         consumerCount += 1;
         Consumer storage consumer = consumers[consumerCount];
         consumer.name = _name;
@@ -412,8 +419,8 @@ contract ElectricitySupplyChain {
             // get all the distributors
             Distributor storage distributor = distributors[distributorArray[i]];
             // showing warning message if distributor has less than 20% energy
-            uint256 minimumEnergyPercentage = (distributor.energyAvailable*20)/100;
-            if(distributor.energyAvailable <= minimumEnergyPercentage) distributor.isLessEnergyWarning=true;
+            
+            if(distributor.energyAvailable<=10) distributor.isLessEnergyWarning=true;
             if (distributor.isEnergySupply) {
                 uint256 totalEnergyConsumedByConsumersOfADistributor = 0;
                 // variable for totalEnergyConsmedofADistributor
@@ -457,6 +464,12 @@ contract ElectricitySupplyChain {
                     ]++;
                     if (distributor.energyAvailable <= 0) {
                         distributor.isEnergySupply = false;
+                        for (uint k = 0; k < distributor.consumerIds.length; k++) {
+                            Consumer storage consumerInner = consumers[
+                                distributor.consumerIds[k]
+                            ];
+                            consumerInner.isElectricitySupply = false;
+                        }
                         break;
                     }
                 }
@@ -570,7 +583,9 @@ contract ElectricitySupplyChain {
         // consumer.endCycleTime = block.timestamp + 30 days;
         consumer.endCycleTime = block.timestamp;
         consumer.energyConsumedInCurrentCycle = 0;
+        if(distributors[consumer.distributorId].isEnergySupply){
         consumer.isElectricitySupply = true;
+        }
         consumer.isLastElectricityBillPaid = true;
 
         //@TODO: need to be reimplemented
@@ -744,6 +759,12 @@ contract ElectricitySupplyChain {
     ) public view distributorExists(_distributorIndex) returns (uint256) {
         return distributorsDailyEnergyBoughtById[_distributorIndex][_day];
     }
+    function getConsumerEnergyBoguhtByDay(
+        uint256 _consumerIndex,
+        uint256 _day
+    ) public view consumerExists(_consumerIndex) returns (uint256) {
+        return consumersDailyEnergyBoughtById[_consumerIndex][_day];
+    }
 
     function getConsumerById(
         uint256 _consumerIndex
@@ -831,6 +852,15 @@ contract ElectricitySupplyChain {
                 .distributorAddress == msg.sender,
             "Only owner allowed"
         );
+        _;
+    }
+
+
+    modifier accountExists(){
+        require(powerPlantsAddressToIds[msg.sender]==0,"Account already exists with Powerplant");
+        require(substationsAddressToIds[msg.sender]==0,"Account already exists with Substation");
+        require(distributorAddressToIds[msg.sender]==0,"Account already exists with Distributor");
+        require(consumersAddressToIds[msg.sender]==0,"Account already exists with Consumer");
         _;
     }
 }
